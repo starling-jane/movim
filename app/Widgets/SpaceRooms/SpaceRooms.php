@@ -28,9 +28,6 @@ class SpaceRooms extends Base
         $this->registerEvent('space_addedroom', 'onEditedRooms');
         $this->registerEvent('space_deletedroom', 'onEditedRooms');
         $this->registerEvent('presence_muc_errorregistrationrequired', 'onRoomRegistrationRequired');
-
-        $this->addjs('spacerooms.js');
-        $this->addcss('spacerooms.css');
     }
 
     public function onAffiliations(Packet $packet)
@@ -93,22 +90,13 @@ class SpaceRooms extends Base
             return;
         }
 
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
         if ($subscription && $firstRoom = $subscription->spaceRooms()->first()) {
             $this->rpc('Chat.getRoom', $firstRoom->conference);
             return;
         }
 
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
         $this->rpc('MovimTpl.fill', '#chat_widget', $this->view('_spacerooms_empty', [
             'subscription' => $subscription
         ]));
@@ -116,19 +104,15 @@ class SpaceRooms extends Base
 
     public function ajaxHttpGet(string $server, string $node, ?bool $edit = false)
     {
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
         if (!$subscription) return;
 
         $this->rpc('MovimTpl.fill', '#spacerooms_widget', $this->view('_spacerooms', [
             'subscription' => $subscription,
             'edit' => $edit,
+            'addplaceholder' => __('rooms.first_room_placeholder', '<i class="material-symbols">rule</i>')
         ]));
-        $this->rpc('Notif_ajaxGet', false);
     }
 
     public function ajaxAdd(string $server, string $node)
@@ -139,8 +123,6 @@ class SpaceRooms extends Base
             ->first();
 
         if ($affiliation->affiliation == 'owner') {
-
-
             $this->dialog($this->view('_spacerooms_add', [
                 'server' => $server,
                 'node' => $node,
@@ -189,7 +171,10 @@ class SpaceRooms extends Base
 
             $sc = $this->xmpp(new SetConfig);
             $sc->setTo($form->conference->value)
-                ->setData(['muc#roomconfig_roomname' => $form->name->value])
+                ->setData([
+                    'muc#roomconfig_roomname' => $form->name->value,
+                    'muc#roominfo_pubsub' => $subscription->uri
+                ])
                 ->request();
         }
     }
@@ -217,6 +202,7 @@ class SpaceRooms extends Base
             ->setPinned($form->pinned->value)
             ->setNick($this->me->username)
             ->setNotify(false)
+            ->setPubsubnode('xmpp:' . $form->server->value . '?;node=' . $form->node->value)
             ->request();
 
         // Publish the item in the Space
@@ -248,11 +234,7 @@ class SpaceRooms extends Base
 
     public function ajaxAskDestroy(string $server, string $node, string $id)
     {
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
         if ($subscription && $conference = $subscription->spaceRooms()->where('conference', $id)->first()) {
             $this->dialog($this->view('_spacerooms_destroy', [
@@ -274,5 +256,11 @@ class SpaceRooms extends Base
             ->setNode($node)
             ->setId($id)
             ->request();
+    }
+
+    public function prepareRoomCounter(Conference $conference)
+    {
+        return (new Rooms(user: $this->me, sessionId: $this->sessionId))
+            ->prepareRoomCounter($conference, withAvatar: true);
     }
 }

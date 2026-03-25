@@ -90,7 +90,7 @@ class Presence extends Model
 
     public function getConferencePictureAttribute(): string
     {
-        return Image::getOrCreate($this->mucjid, 120) ?? avatarPlaceholder($this->resource);
+        return Image::getOrCreate($this->mucjid, width: 120) ?? avatarPlaceholder($this->resource);
     }
 
     public function getAffiliationTxtAttribute(): ?string
@@ -114,7 +114,7 @@ class Presence extends Model
         return $temporary;
     }
 
-    public function set(User $user, \SimpleXMLElement $stanza)
+    public function set(User $user, \SimpleXMLElement $stanza): bool
     {
         $this->session_id = $user->session->id;
         $jid = explodeJid($stanza->attributes()->from);
@@ -226,6 +226,19 @@ class Presence extends Model
                 ]));
             }
         }
+
+
+
+        if (
+            ($this->mucjid != null && !validateJid($this->mucjid))
+            || ($this->mucjidresource != null && !validateJid($this->mucjidresource))
+            || !validateJid($this->jid)
+            || ($this->resource != '' && !validateResource($this->resource))
+        ) {
+            return false;
+        }
+
+        return true;
     }
 
     public function toArray()

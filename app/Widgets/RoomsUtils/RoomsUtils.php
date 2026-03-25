@@ -33,6 +33,7 @@ use Movim\Image;
 
 use Respect\Validation\Validator;
 use Illuminate\Database\Capsule\Manager as DB;
+use Moxl\Xec\Action\Muc\DiscoRequest;
 
 class RoomsUtils extends Base
 {
@@ -55,6 +56,9 @@ class RoomsUtils extends Base
         $this->registerEvent('muc_setrole_handle', 'onSetRole');
         $this->registerEvent('message_invite_error', 'onInviteError');
 
+        $this->registerEvent('muc_discorequest_handle', 'onMucDiscoRequest');
+        $this->registerEvent('muc_discorequest_error', 'onMucDiscoError');
+
         $this->registerEvent('presence_muc_create_handle', 'onMucCreated');
         $this->registerEvent('presence_muc_errornotallowed', 'onPresenceMucNotAllowed');
         $this->registerEvent('presence_muc_errorgone', 'onPresenceMucNotAllowed');
@@ -65,7 +69,7 @@ class RoomsUtils extends Base
 
     public function ajaxGetDrawer($room = false)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -244,7 +248,7 @@ class RoomsUtils extends Base
      */
     public function ajaxGetAvatar($room)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -260,24 +264,24 @@ class RoomsUtils extends Base
      */
     public function ajaxSetAvatar($room, $form)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
         $tempKey = \generateKey(6);
 
-        $p = new Image;
-        $p->fromBase64($form->photobin->value);
-        $p->setKey($tempKey);
-        $p->save(false, false, 'jpeg', 60);
+        $image = new Image;
+        $image->fromBase64($form->photobin->value);
+        $image->setKey($tempKey);
+        $image->save(format: 'jpeg', quality: 60);
 
         // Reload
-        $p->load('jpeg');
+        $image->load('jpeg');
 
         $vcard = new \stdClass;
         $vcard->photobin = new \stdClass;
         $vcard->phototype = new \stdClass;
-        $vcard->photobin->value = $p->toBase();
+        $vcard->photobin->value = $image->toBase();
         $vcard->phototype->value = 'image/jpeg';
 
         $r = $this->xmpp(new VcardSet);
@@ -400,7 +404,7 @@ class RoomsUtils extends Base
      */
     public function ajaxGetSubject($room)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -418,7 +422,7 @@ class RoomsUtils extends Base
     public function ajaxSetSubject($room, $form)
     {
         if (
-            !validateRoom($room)
+            !validateJid($room)
             || !Validator::stringType()->length(0, 200)->isValid($form->subject->value)
         ) {
             return;
@@ -440,6 +444,67 @@ class RoomsUtils extends Base
             'room' => $room,
             'invite' => \App\Invite::set($this->me->id, $room),
         ]));
+    }
+
+    public function ajaxHttpRoomDiscover(?string $room = null)
+    {
+        $gateways = \App\Info::select('name', 'server', 'parent')
+            ->whereCategory('gateway')
+            ->whereNotNull('parent')
+            ->groupBy('name', 'server', 'parent')
+            ->orderBy('parent')
+            ->orderBy('server')
+            ->get();
+
+        $gateways = $gateways->filter(fn($gateway) => $gateway->parent === $this->me->session->host)
+            ->concat($gateways->reject(fn($gateway) => $gateway->parent === $this->me->session->host));
+
+        $this->dialog($this->view('_rooms_room_discover', [
+            'room' => $room,
+            'gateways' => $gateways,
+            'mucservice' => \App\Info::where('parent', $this->me->session->host)
+                ->whereDoesntHave('identities', function ($query) {
+                    $query->where('category', 'gateway');
+                })
+                ->whereCategory('conference')
+                ->whereType('text')
+                ->first(),
+        ]));
+
+        if ($room) {
+            $this->rpc('RoomsUtils_ajaxDiscoRoom', $room);
+        }
+    }
+
+    public function ajaxDiscoRoom(?string $room = null)
+    {
+        $this->rpc('MovimTpl.fill', '#rooms_discover_result', '');
+
+        if ($room != null && validateJid($room)) {
+            $request = $this->xmpp(new DiscoRequest);
+            $request->setTo($room)
+                ->request();
+        } elseif (!empty($room)) {
+            $this->toast($this->__('rooms.disco_not_muc'));
+        }
+    }
+
+    public function onMucDiscoRequest(Packet $packet)
+    {
+        $packet->content->uuidMuc = Validator::uuid()->isValid(substr($packet->content->server, 0, 36));
+
+        $this->rpc('MovimTpl.fill', '#rooms_discover_result', $this->view('_rooms_room_discover_result', [
+            'info' => $packet->content
+        ]));
+
+        if ($packet->content->isMuc()) {
+            $this->rpc('MovimUtils.removeClass', '#rooms_discover_add', 'disabled');
+        }
+    }
+
+    public function onMucDiscoError(Packet $packet)
+    {
+        $this->rpc('MovimTpl.fill', '#rooms_discover_result', $this->view('_rooms_room_discover_error'));
     }
 
     /**
@@ -473,21 +538,7 @@ class RoomsUtils extends Base
         $view->assign('name', $name);
         $view->assign('username', $this->me->username);
 
-        $gateways = \App\Info::select('name', 'server', 'parent')
-            ->whereCategory('gateway')
-            ->whereNotNull('parent')
-            ->groupBy('name', 'server', 'parent')
-            ->orderBy('parent')
-            ->orderBy('server')
-            ->get();
-
-        $gateways = $gateways->filter(fn($gateway) => $gateway->parent === $this->me->session->host)
-            ->concat($gateways->reject(fn($gateway) => $gateway->parent === $this->me->session->host));
-
-        $view->assign('gateways', $gateways);
-
         $this->rpc('Rooms.setDefaultServices', $this->me->session->getChatroomsServices());
-
         $this->dialog($view->draw('_rooms_add'));
     }
 
@@ -499,7 +550,7 @@ class RoomsUtils extends Base
         $service = Info::where('parent', $this->me->session->host)
             ->whereCategory('conference')
             ->whereType('text')
-            ->whereDoesntHave('identities', function ($query)  {
+            ->whereDoesntHave('identities', function ($query) {
                 $query->where('category', 'gateway');
             })
             ->first();
@@ -516,7 +567,7 @@ class RoomsUtils extends Base
      */
     public function ajaxAddCreate($form)
     {
-        if (!validateRoom($form->jid->value)) {
+        if (!validateJid($form->jid->value)) {
             $this->toast($this->__('chatrooms.bad_id'));
         } elseif (trim($form->name->value) == '') {
             $this->toast($this->__('chatrooms.empty_name'));
@@ -532,7 +583,7 @@ class RoomsUtils extends Base
 
     public function ajaxConfigureCreated($form)
     {
-        if (!validateRoom($form->jid->value)) {
+        if (!validateJid($form->jid->value)) {
             $this->toast($this->__('chatrooms.bad_id'));
         } else {
             if ($form->type->value == 'groupchat') {
@@ -562,7 +613,7 @@ class RoomsUtils extends Base
      */
     public function ajaxAddConfirm($form)
     {
-        if (!validateRoom($form->jid->value)) {
+        if (!validateJid($form->jid->value)) {
             $this->toast($this->__('chatrooms.bad_id'));
         } elseif (trim($form->name->value) == '') {
             $this->toast($this->__('chatrooms.empty_name'));
@@ -588,7 +639,7 @@ class RoomsUtils extends Base
      */
     public function ajaxRemove($room)
     {
-        if (!validateRoom($room)) return;
+        if (!validateJid($room)) return;
         $this->dialog($this->view('_rooms_remove', ['room' => $room]));
     }
 
@@ -597,7 +648,7 @@ class RoomsUtils extends Base
      */
     public function ajaxRemoveConfirm($room)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -620,7 +671,7 @@ class RoomsUtils extends Base
      */
     public function ajaxInvite($form)
     {
-        if (!validateRoom($form->to->value)) {
+        if (!validateJid($form->to->value)) {
             return;
         }
 
@@ -672,7 +723,7 @@ class RoomsUtils extends Base
      */
     public function ajaxAskDestroy($room)
     {
-        if (!validateRoom($room)) return;
+        if (!validateJid($room)) return;
         $this->dialog($this->view('_rooms_destroy', ['room' => $room]));
     }
 
@@ -681,7 +732,7 @@ class RoomsUtils extends Base
      */
     public function ajaxDestroy($room)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -695,7 +746,7 @@ class RoomsUtils extends Base
      */
     public function ajaxHttpGetPictures($room, $page = 0)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -730,7 +781,7 @@ class RoomsUtils extends Base
      */
     public function ajaxHttpGetLinks($room, $page = 0)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -777,7 +828,7 @@ class RoomsUtils extends Base
     public function ajaxDiscoGateway(string $server)
     {
         $this->ajaxResetGatewayRooms();
-        $this->rpc('Rooms.selectGatewayRoom', '', '');
+        $this->rpc('Rooms.selectGatewayRoom', '');
 
         if (!empty($server)) {
             $r = $this->xmpp(new Items);
@@ -792,7 +843,7 @@ class RoomsUtils extends Base
      */
     public function ajaxAddBanned(string $room)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -806,7 +857,7 @@ class RoomsUtils extends Base
      */
     public function ajaxAddBannedConfirm(string $room, $form)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -827,7 +878,7 @@ class RoomsUtils extends Base
      */
     public function ajaxRemoveBanned(string $room, string $jid)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -844,7 +895,7 @@ class RoomsUtils extends Base
      */
     public function ajaxRemoveBannedConfirm(string $room, string $jid)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -860,7 +911,7 @@ class RoomsUtils extends Base
      */
     public function ajaxConfigureUser(string $room, string $jid)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -881,7 +932,7 @@ class RoomsUtils extends Base
      */
     public function ajaxChangeVoice(string $room, string $mucjid, $form)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -907,7 +958,7 @@ class RoomsUtils extends Base
      */
     public function ajaxChangeAffiliationConfirm(string $room, $form)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -982,6 +1033,10 @@ class RoomsUtils extends Base
         $this->rpc('MovimTpl.fill', '#gateway_rooms', $this->view('_rooms_gateway_rooms', [
             'rooms' => $rooms
         ]));
+
+        if ($rooms->count() > 0) {
+            $this->rpc('Rooms.selectGatewayRoom', $rooms->keys()->first());
+        }
     }
 
     public function onDiscoGatewayError(Packet $packet)

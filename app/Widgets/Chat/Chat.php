@@ -7,6 +7,7 @@ use Moxl\Xec\Action\Message\Reactions;
 
 use Moxl\Xec\Action\Muc\GetConfig;
 use Moxl\Xec\Action\Muc\SetConfig;
+use Moxl\Xec\Action\Muc\GetMembers;
 
 use App\Contact;
 use App\Message;
@@ -157,7 +158,7 @@ class Chat extends \Movim\Widget\Base
                 ->where('mucjid', $this->me->id)
                 ->first();
 
-            $this->getMessages($jid, muc: ($presence), seenOnly: true);
+            $this->getMessages($jid, muc: $presence != null, seenOnly: true);
         }
     }
 
@@ -175,6 +176,8 @@ class Chat extends \Movim\Widget\Base
         $from = null;
         $chatStates = linker($this->sessionId)->chatStates;
         $rawbody = $message->getInlinedBodyAttribute(true) ?? $message->body;
+
+        $spaceCounter = false;
 
         if (
             $message->isEmpty() && !in_array(
@@ -297,7 +300,7 @@ class Chat extends \Movim\Widget\Base
                         $subscription
                         && (
                             $subscription->notify == 'always'
-                            || ($subscription->notification == 'on-mention' && $message->quoted)
+                            || ($subscription->notify == 'on-mention' && $message->quoted)
                         )
                     ) {
                         $title = $conference->spaceInfo?->name
@@ -324,6 +327,18 @@ class Chat extends \Movim\Widget\Base
                             rpcCall: 'Notif.incomingMessage'
                         );
                     }
+
+                    Wrapper::getInstance()->iterate(
+                        'space_counter',
+                        (new Packet)->pack(
+                            $this->me->unreads(space: [$conference->space_server, $conference->space_node]),
+                            $subscription->counterId
+                        ),
+                        user: $this->me,
+                        sessionId: $this->sessionId
+                    );
+
+                    $spaceCounter = true;
                 } elseif ($conference && $conference->notify == 0) {
                     $message->seen = true;
                     $message->save();
@@ -336,7 +351,10 @@ class Chat extends \Movim\Widget\Base
         }
 
         $this->rpc('Chat.appendMessagesWrapper', $this->prepareMessage($message, $from));
-        Wrapper::getInstance()->iterate('chat_counter', (new Packet)->pack($this->me->unreads()), user: $this->me, sessionId: $this->sessionId);
+
+        if ($spaceCounter) {
+            Wrapper::getInstance()->iterate('chat_counter', (new Packet)->pack($this->me->unreads()), user: $this->me, sessionId: $this->sessionId);
+        }
     }
 
     public function onSticker(Packet $packet)
@@ -385,6 +403,13 @@ class Chat extends \Movim\Widget\Base
     public function onMucConnected(Packet $packet)
     {
         $arr = explode('|', (new Notif($this->me, sessionId: $this->sessionId))->getCurrent());
+
+        if (in_array($packet->content->mucaffiliation, ['admin', 'owner'])) {
+            $m = $this->xmpp(new GetMembers);
+            $m->setTo($packet->content->jid)
+                ->request();
+        }
+
 
         if ($packet->content && isset($arr[1]) && $arr[1] == $packet->content->jid) {
             $this->ajaxGetRoom($packet->content->jid, noConnect: true);
@@ -521,7 +546,7 @@ class Chat extends \Movim\Widget\Base
             }
 
             if ($conference->isFromSpace() && $info = $conference->spaceInfo) {
-                $this->rpc('Notif.setTitle', $this->__('page.chats') . ' • ' . $info->name . ' • ' . $conference->name);
+                $this->rpc('Notif.setTitle', $this->__('page.space') . ' • ' . $info->name . ' • ' . $conference->name);
             } else {
                 $this->rpc('Notif.setTitle', $this->__('page.chats') . ' • ' . $conference->name);
             }
@@ -556,7 +581,7 @@ class Chat extends \Movim\Widget\Base
                 $this->rpc('Chat.setGroupChatMembers', []);
             }
         } else {
-            $this->rpc('RoomsUtils_ajaxAdd', $room);
+            $this->rpc('RoomsUtils_ajaxHttpRoomDiscover', $room);
             $this->ajaxHttpGetEmpty();
         }
     }
@@ -603,7 +628,15 @@ class Chat extends \Movim\Widget\Base
             $messageOMEMOHeader->import($omemo);
         }
 
-        $this->sendMessage($to, $message, $muc, null, $messageFile, $replyToMid, $mucReceipts, $messageOMEMOHeader);
+        $this->sendMessage(
+            to: $to,
+            message: $message,
+            muc: $muc,
+            file: $messageFile,
+            replyToMid: $replyToMid,
+            mucReceipts: $mucReceipts,
+            messageOMEMOHeader: $messageOMEMOHeader
+        );
     }
 
     /**
@@ -1273,11 +1306,11 @@ class Chat extends \Movim\Widget\Base
     public function ajaxClearAndGetMessages(string $jid, $muc = false)
     {
         $this->rpc('MovimTpl.fill', '#' . cleanupId($jid) . '-conversation', '');
-        $this->getMessages($jid, $muc);
+        $this->getMessages($jid, muc: $muc);
         $this->rpc('MovimUtils.removeClass', '#chat_widget .contained', 'history');
     }
 
-    public function getMessages(string $jid, $muc = false, $seenOnly = false, $event = true)
+    public function getMessages(string $jid, ?bool $muc = false, ?bool $seenOnly = false, ?bool $event = true)
     {
         if (!validateJid($jid)) {
             return;
@@ -1509,6 +1542,16 @@ class Chat extends \Movim\Widget\Base
                     }
                 }
             } elseif (isset($message->file) && $message->file->type != 'xmpp') {
+                if (
+                    !$message->file->preview
+                    && !typeIsAudio($message->file->type)
+                    && !typeIsVideo($message->file->type)
+                ) {
+                    $view = $this->tpl();
+                    $view->assign('file', $message->file);
+                    $message->card = $view->draw('_chat_file');
+                }
+
                 $message->body = '';
             }
         }
@@ -1794,7 +1837,7 @@ class Chat extends \Movim\Widget\Base
                 ->first()
         );
         $view->assign('anon', false);
-        $view->assign('counter', $this->me->unreads(null, false, true));
+        $view->assign('counter', $this->me->unreads(cached: true));
 
         if ($muc) {
             $view->assign('conference', $this->me->session->conferences()

@@ -45,12 +45,12 @@ input::placeholder, textarea::placeholder, select::placeholder {
     color: rgba(var(--movim-font), 0.67);
 }
 
-ul.list li.divided,
-ul.list li.divided.spaced:after,
+ul.list li.divided:after,
+*.divided:not(.spaced):not(li)>*:not(:last-child):not(.subheader):after,
+*.divided.spaced > *:not(:last-child):after,
 hr:not(.clear),
 .card > .block:not(.subheader):not(.simple),
-*.divided > *:not(:last-child),
-*.divided.spaced > *:not(:last-child):after {
+*.divided > *:not(:last-child) {
     border-color: rgba(var(--movim-font), 0.12);
 }
 
@@ -80,7 +80,7 @@ ul > li.date > div > p,
 main > header a,
 .icon:not(.placeholder):not(.active) a,
 .color input {
-    color: white;
+    color: rgb(var(--movim-font));
 }
 
 .button.color,
@@ -205,6 +205,10 @@ header:not(.big) .icon a,
 a {
     color: var(--movim-accent);
     border-color: var(--movim-accent);
+}
+
+a.normal {
+    color: inherit;
 }
 
 form > div .checkbox:before { background-color: var(--movim-accent); }

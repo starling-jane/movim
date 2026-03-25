@@ -7,11 +7,12 @@ ul#spacesmenu_widget {
 ul#spacesmenu_widget li span.primary.space_add:before {
     content: '';
     display: block;
-    width: 5rem;
-    height: 5rem;
+    width: 5.5rem;
+    height: 5.5rem;
     background-color: rgba(var(--movim-font), 0.04);
     position: absolute;
-    top: 0;
+    top: -0.25rem;
+    left: -0.25rem;
     border-radius: 2rem;
 }
 
@@ -21,7 +22,7 @@ ul#spacesmenu_widget li.enabled span.primary img {
     box-shadow: var(--elevation-3);
 }
 
-ul#spacesmenu_widget li.pinned span.primary:after {
+ul#spacesmenu_widget li.pinned:not(.locked) span.primary::before {
     display: inline-block;
     position: absolute;
     bottom: 0;
@@ -39,7 +40,16 @@ ul#spacesmenu_widget li.pinned span.primary:after {
     box-shadow: var(--elevation-1);
 }
 
-ul#spacesmenu_widget span.primary.locked::before {
+ul#spacesmenu_widget li span.primary[data-counter]:after {
+    content: '\e0ca';
+}
+
+/* If we have messages _and_ quote notifications, we prioritize the second one */
+ul#spacesmenu_widget li span.primary[data-counter]:has(span.counter:not(:empty)):after {
+    display: none;
+}
+
+ul#spacesmenu_widget li span.primary.locked::before {
     display: inline-block;
     position: absolute;
     width: 5rem;

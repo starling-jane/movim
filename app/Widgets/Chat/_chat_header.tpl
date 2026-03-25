@@ -11,15 +11,18 @@
                 <i class="material-symbols">arrow_back</i>
             </span>
 
-            {if="$conference && $conference->isFromSpace()"}
-                <span class="primary icon gray">
-                    <i class="material-symbols">tag</i>
-            {elseif="$conference"}
-                <span class="primary icon bubble active
-                    {if="!$conference->connected"}disabled{/if}"
-                    onclick="RoomsUtils_ajaxGetDrawer('{$jid|echapJS}')">
-                    <img src="{$conference->getPicture()}">
-            {else}
+            {if="$conference"}
+                {if="!$conference->isFromSpace()"}
+                    <span class="primary icon bubble active
+                        {if="!$conference->connected"}disabled{/if}"
+                        onclick="RoomsUtils_ajaxGetDrawer('{$jid|echapJS}')">
+                        <img src="{$conference->getPicture()}">
+                {else}
+                    <span class="primary icon gray">
+                        <i class="material-symbols">tag</i>
+                    </span>
+                {/if}
+            {elseif="!$conference"}
                 <span class="primary icon bubble active"
                     onclick="RoomsUtils_ajaxGetDrawer('{$jid|echapJS}')">
                     <img src="{$jid|avatarPlaceholder}">
@@ -32,7 +35,7 @@
                     </span>
                 {elseif="$conference->connected"}
                     {$count = $conference->presences()->count()}
-                    <span class="counter alt" data-mucreceipts="{if="$conference->presences()->count() < 10"}true{/if}">
+                    <span class="counter alt" {if="$conference->presences()->count() < 10"}data-mucreceipts="true"{/if}>
                         {if="$count > 99"}99+{else}{$count}{/if}
                     </span>
                 {/if}
@@ -97,7 +100,12 @@
                         {/if}
                     {/if}
                 {/if}
-                <p class="line active" title="{$jid|echapJS}" onclick="RoomsUtils_ajaxGetDrawer('{$jid|echapJS}')">
+                <p title="{$jid|echapJS}"
+                    {if="!$conference->isFromSpace()"}
+                        class="line active" onclick="RoomsUtils_ajaxGetDrawer('{$jid|echapJS}')"
+                    {else}
+                        class="line"
+                    {/if}>
                     {if="$conference && $conference->title"}
                         {$conference->title}
                         {if="$conference->notify == 0"}

@@ -284,6 +284,22 @@ class Info extends Model
         return (in_array($feature, unserialize($this->attributes['features'])));
     }
 
+    public function isMuc(): bool
+    {
+        return $this->hasFeature('http://jabber.org/protocol/muc');
+    }
+
+    public function isGroupChat(): bool
+    {
+        return $this->mucmembersonly && !$this->mucsemianonymous;
+    }
+
+    public function isAccount(): bool
+    {
+        return $this->identities->contains('category', 'account')
+            && $this->identities->contains('category', 'client');
+    }
+
     public function isGallery(): bool
     {
         return in_array($this->type, ['urn:xmpp:pubsub-social-gallery:0', 'urn:xmpp:pubsub-social-feed:gallery:1']);
@@ -532,7 +548,7 @@ class Info extends Model
 
     public function getPubsubRoles()
     {
-        $roles = ['owner' => __('affiliation.owner'), 'none' =>  __('affiliation.no-aff')];
+        $roles = ['owner' => __('affiliation.owner'), 'none' =>  __('affiliation.no_aff')];
 
         $features = unserialize($this->attributes['features']);
 

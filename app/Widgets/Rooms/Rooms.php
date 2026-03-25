@@ -5,11 +5,11 @@ namespace App\Widgets\Rooms;
 use Moxl\Xec\Action\Disco\Request;
 use Moxl\Xec\Action\Presence\Muc;
 use Moxl\Xec\Action\Presence\Unavailable;
-use Moxl\Xec\Action\Muc\GetMembers;
 
 use Movim\Widget\Base;
 
 use App\Conference;
+use Movim\Widget\Wrapper;
 use Moxl\Xec\Payload\Packet;
 
 class Rooms extends Base
@@ -190,7 +190,7 @@ class Rooms extends Base
     {
         $conference = $packet->content;
 
-        if ($conference->isFromSpace()) return;
+        if (!$conference || $conference->isFromSpace()) return;
 
         if ($conference && $conference->autojoin) {
             $this->ajaxJoin($conference->conference, $conference->nick);
@@ -214,6 +214,18 @@ class Rooms extends Base
             ->first();
 
         if ($conference) {
+            if ($conference->isFromSpace()) {
+                Wrapper::getInstance()->iterate(
+                    'space_counter',
+                    (new Packet)->pack(
+                        $this->me->unreads(space: [$conference->space_server, $conference->space_node]),
+                        $conference->spaceCounterId
+                    ),
+                    user: $this->me,
+                    sessionId: $this->sessionId
+                );
+            }
+
             $this->rpc(
                 'MovimTpl.fill',
                 '#' . cleanupId($room . '_rooms_primary'),
@@ -274,7 +286,7 @@ class Rooms extends Base
      */
     public function ajaxJoin(string $room, ?string $nickname = null)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 
@@ -308,10 +320,6 @@ class Rooms extends Base
             }
         }
 
-        $m = $this->xmpp(new GetMembers);
-        $m->setTo($room)
-            ->request();
-
         $p->setNickname($nickname);
         $p->request();
     }
@@ -323,7 +331,7 @@ class Rooms extends Base
      */
     public function ajaxExit($room)
     {
-        if (!validateRoom($room)) {
+        if (!validateJid($room)) {
             return;
         }
 

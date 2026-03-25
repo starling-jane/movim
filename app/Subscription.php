@@ -35,7 +35,8 @@ class Subscription extends Model
     {
         return $this->hasMany(Conference::class, ['space_server', 'space_node', 'user_id'], ['server', 'node', 'jid'])
             ->orderBy('pinned', 'desc')
-            ->orderBy('name', 'asc');
+            ->orderBy('name', 'asc')
+            ->withCount('unreads', 'quoted');
     }
 
     public function setExtensions(?\SimpleXMLElement $extensions = null)
@@ -57,7 +58,7 @@ class Subscription extends Model
                     $this->notify = 2;
                 }
 
-                unset($item->conference->extensions->notify);
+                unset($extensions->notify);
             }
 
             if (
@@ -65,7 +66,7 @@ class Subscription extends Model
                 && $extensions->pinned->attributes()->xmlns == Conference::XMLNS_PINNED
             ) {
                 $this->pinned = true;
-                unset($item->conference->extensions->pinned);
+                unset($extensions->pinned);
             }
 
             $this->extensions = $extensions->asXML();
@@ -77,11 +78,6 @@ class Subscription extends Model
         return $this->hasMany(Affiliation::class, ['server', 'node'], ['server', 'node']);
     }
 
-    public function getSpaceURIAttribute(): string
-    {
-        return 'xmpp:' . $this->server . '?;node=' . $this->node;
-    }
-
     public function getNotifyAttribute(): ?string
     {
         return is_int($this->attributes['notify'])
@@ -89,9 +85,31 @@ class Subscription extends Model
             : null;
     }
 
+    public function getCounterIdAttribute(): string
+    {
+        return cleanupId($this->server . $this->node . '-counter');
+    }
+
+    public function getUriAttribute(): string
+    {
+        return 'xmpp:' . $this->server . '?;node=' . $this->node;
+    }
+
+    public function spaceUnreads(User $user): int
+    {
+        return $user->unreads(space: [$this->server, $this->node]);
+    }
+
     public function scopeSpaces($query, ?bool $yes = true)
     {
         return $query->where('space', $yes);
+    }
+
+    public function scopeSpace($query, string $server, string $node)
+    {
+        return $query->where('space', true)
+            ->where('server', $server)
+            ->where('node', $node);
     }
 
     public function scopeCommunities($query)

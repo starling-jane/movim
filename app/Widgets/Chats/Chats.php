@@ -355,7 +355,7 @@ class Chats extends Base
         $view->assign('status', $status);
         $view->assign('contact', $contact);
         $view->assign('roster', $roster);
-        $view->assign('count', $this->me->unreads($jid));
+        $view->assign('count', $this->me->unreads(jid: $jid));
         $view->assign('contactincall', $this->currentCall()?->isJidInCall($jid));
 
         if ($status == null) {
@@ -435,6 +435,7 @@ class Chats extends Base
     public function display()
     {
         $this->view->assign('filters', $this->_filters);
+        $this->view->assign('addplaceholder', __('chats.empty', '<i class="material-symbols">chat_add_on</i>'));
         $this->view->assign('filter', $this->me
             ? $this->me->chats_filter : '');
     }

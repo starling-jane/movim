@@ -36,9 +36,15 @@ class SpacesMenu extends Base
         $this->registerEvent('space_subscribe_errorpendingsubscription', 'onPendingSubscription');
         $this->registerEvent('space_setsubscription_handle', 'onSetSubscription');
         $this->registerEvent('message_pubsub_subscribed', 'onMessageSubscribed');
+        $this->registerEvent('space_counter', 'onCounter');
 
         $this->addjs('spacesmenu.js');
         $this->addcss('spacesmenu.css');
+    }
+
+    public function onCounter(Packet $packet)
+    {
+        $this->rpc('MovimUtils.setDataItem', '#' . $packet->from, 'counter', $packet->content);
     }
 
     public function onClosedNode(Packet $packet)
@@ -80,11 +86,7 @@ class SpacesMenu extends Base
     public function onMessageSubscribed(Packet $packet)
     {
         $this->onRooms($packet);
-
-        $roomsGet = $this->xmpp(new GetRooms);
-        $roomsGet->setTo($packet->content['server'])
-            ->setNode($packet->content['node'])
-            ->request();
+        $this->ajaxGetRooms($packet->content['server'], $packet->content['node']);
     }
 
     public function onRooms(Packet $packet)
@@ -116,17 +118,14 @@ class SpacesMenu extends Base
                     $this->ajaxGetSpaceInfo($space->server, $space->node);
                 }
 
-                $roomsGet = $this->xmpp(new GetRooms);
-                $roomsGet->setTo($space->server)
-                    ->setNode($space->node)
-                    ->request();
+                $this->ajaxGetRooms($space->server, $space->node);
             }
 
             $this->ajaxHttpGet();
         }
     }
 
-    public function ajaxGetRoom(string $server, string $node)
+    public function ajaxGetRooms(string $server, string $node)
     {
         $roomsGet = $this->xmpp(new GetRooms);
         $roomsGet->setTo($server)
@@ -168,11 +167,7 @@ class SpacesMenu extends Base
             ->setSubscription('subscribed')
             ->request();
 
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
         if ($subscription) {
             $setNodeAffiliation = $this->xmpp(new SetAffiliations);
@@ -226,11 +221,7 @@ class SpacesMenu extends Base
 
     public function ajaxLeave(string $server, string $node)
     {
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
         if ($subscription) {
             $subscribe = $this->xmpp(new Unsubscribe);
@@ -265,15 +256,6 @@ class SpacesMenu extends Base
             ->request();
     }
 
-    /*
-    public function ajaxGetSpacesSubscription()
-    {
-        $ps = $this->xmpp(new GetPubsubSubscriptions);
-        $ps->setTo($this->me->id)
-            ->setPEPNode(Subscription::SPACE_NODE)
-            ->request();
-    }*/
-
     public function ajaxGetSpaceInfo(string $server, string $node)
     {
         $request = $this->xmpp(new Request);
@@ -282,7 +264,7 @@ class SpacesMenu extends Base
             ->request();
     }
 
-    public function ajaxHttpGet(?string $server = null, ?string $node = null, ?bool $isMobile = false)
+    public function ajaxHttpGet(?string $server = null, ?string $node = null, ?string $conference = null, ?bool $isMobile = false)
     {
         $this->rpc('MovimTpl.fill', '#spacesmenu_widget', $this->prepareMenu($server, $node));
         $this->rpc('Notif_ajaxGet', false);
@@ -293,10 +275,9 @@ class SpacesMenu extends Base
             $this->rpc('SpaceInfo_ajaxHttpGet', $server, $node);
 
             if (!$isMobile) {
-                $this->rpc('SpaceRooms_ajaxHttpGetChat', $server, $node);
+                $this->rpc('SpaceRooms_ajaxHttpGetChat', $server, $node, $conference);
             }
         }
-
     }
 
     public function ajaxAdd()

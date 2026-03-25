@@ -27,11 +27,20 @@ var Chat = {
     searchAutocomplete: null,
 
     // Touch
+    delay: 20,
+    clientWidth: null,
+
     startX: 0,
     startY: 0,
     translateX: 0,
     translateY: 0,
     slideAuthorized: false,
+
+    messageStartX: 0,
+    messageStartY: 0,
+    messageTranslateX: 0,
+    messageTranslateY: 0,
+    messageSlideAuthorized: false,
 
     // Temporary messages, for OMEMO local messages
     tempMessages: {},
@@ -46,6 +55,8 @@ var Chat = {
 
     init: function (date, separator, config) {
         var div = document.createElement('div');
+
+        Chat.clientWidth = Math.abs(document.body.clientWidth);
 
         div.innerHTML = date;
         Chat.date = div.firstChild.cloneNode(true);
@@ -151,7 +162,7 @@ var Chat = {
                 Chats.setActive(jid);
             } else {
                 Chats.clearAllActives();
-                Rooms.clearAllActives();
+                MovimUtils.clearAllActivesRooms();
             }
 
             Chat_ajaxGet(jid, light);
@@ -167,14 +178,14 @@ var Chat = {
     getRoom: function (jid) {
         MovimTpl.showPanel();
         document.querySelector('#chat_widget').innerHTML = '';
-        if (typeof Rooms != 'undefined') Rooms.setActive(jid);
+        MovimUtils.setActiveRoom(jid);
 
         Chat_ajaxGetRoom(jid);
     },
     getHistory: function (tryMam) {
         var textarea = Chat.getTextarea();
+        let firstMessage = Chat.getDiscussion()?.querySelector('.message');
 
-        let firstMessage = Chat.getDiscussion().querySelector('.message');
         if (textarea) {
             Chat_ajaxGetHistory(
                 textarea.dataset.jid,
@@ -194,7 +205,7 @@ var Chat = {
 
         if (isMuc) {
             var counter = document.querySelector('#chat_widget header span.counter');
-            mucReceipts = (counter && Boolean(counter.dataset.mucreceipts));
+            mucReceipts = (counter && counter.dataset.mucreceipts == 'true');
         }
 
         Chat.removeSeparator();
@@ -892,6 +903,50 @@ var Chat = {
             }
         });
     },
+    setMessageSwipeBehaviour: function () {
+        if (MovimUtils.isMobile()) {
+            document.querySelectorAll('#chat_widget li div.bubble:not(.file) > div.message').forEach(message => {
+                message.ontouchstart = function (event) {
+                    Chat.messageStartX = event.targetTouches[0].pageX;
+                    Chat.messageStartY = event.targetTouches[0].pageY;
+                };
+
+                message.ontouchmove = function (event) {
+                    Chat.messageTranslateX = parseInt(event.targetTouches[0].pageX - Chat.messageStartX);
+                    Chat.messageTranslateY = parseInt(event.targetTouches[0].pageY - Chat.messageStartY);
+                    if (Math.abs(Chat.messageTranslateX) > Chat.delay && Math.abs(Chat.messageTranslateX) <= Chat.clientWidth) {
+                        if (Math.abs(Chat.messageTranslateY) < Chat.delay) {
+                            Chat.messageSlideAuthorized = true;
+                        }
+
+                        if (Chat.messageTranslateX < -100) {
+                            message.classList.add('reply');
+                        } else {
+                            message.classList.remove('reply');
+                        }
+
+                        if (Chat.messageSlideAuthorized && Chat.messageTranslateX < 0 && Chat.messageTranslateX > -110) {
+                            message.parentNode.style.transform = 'translateX(' + (Chat.messageTranslateX + Chat.delay) + 'px)';
+                        }
+                    } else {
+                        message.parentNode.style.transform = '';
+                        message.classList.remove('reply');
+                    }
+                };
+
+                message.ontouchend = function (event) {
+                    if (Math.abs(Chat.messageTranslateX) > 100 && Chat.messageSlideAuthorized) {
+                        Chat_ajaxHttpDaemonReply(message.dataset.mid);
+                    }
+
+                    message.classList.remove('reply');
+                    message.parentNode.style.transform = '';
+                    Chat.messageSlideAuthorized = false;
+                    Chat.messageStartX = Chat.messageStartY = Chat.messageTranslateX = Chat.messageTranslateY = 0;
+                };
+            });
+        }
+    },
     checkDiscussion: function (page) {
         for (var firstKey in page) break;
         if (page[firstKey] == null) return false;
@@ -1000,6 +1055,7 @@ var Chat = {
         Chat.setVideoObserverBehaviour();
         Chat.setAudioPlayersBehaviour();
         Chat.setMessagePressBehaviour();
+        Chat.setMessageSwipeBehaviour();
     },
     appendMessage: function (idjidtime, data, prepend) {
         if (data.body === null) return;
@@ -1645,33 +1701,27 @@ var Chat = {
     },
     touchEvents: function () {
         var chat = document.querySelector('#chat_widget');
-        clientWidth = Math.abs(document.body.clientWidth);
-
         if (!chat) return;
 
         chat.addEventListener('touchstart', function (event) {
             chat.classList.remove('moving');
-
             Chat.startX = event.targetTouches[0].pageX;
             Chat.startY = event.targetTouches[0].pageY;
         }, true);
 
         chat.addEventListener('touchmove', function (event) {
-            moveX = event.targetTouches[0].pageX;
-            moveY = event.targetTouches[0].pageY;
-            delay = 20;
-            Chat.translateX = parseInt(moveX - Chat.startX);
-            Chat.translateY = parseInt(moveY - Chat.startY);
+            Chat.translateX = parseInt(event.targetTouches[0].pageX - Chat.startX);
+            Chat.translateY = parseInt(event.targetTouches[0].pageY - Chat.startY);
 
-            if (Chat.translateX > delay && Chat.translateX <= clientWidth) {
+            if (Chat.translateX > Chat.delay && Chat.translateX <= Chat.clientWidth) {
                 // If the horizontal movement is allowed and the vertical one is not important
                 // we authorize the slide
-                if (Math.abs(Chat.translateY) < delay) {
+                if (Math.abs(Chat.translateY) < Chat.delay) {
                     Chat.slideAuthorized = true;
                 }
 
                 if (Chat.slideAuthorized) {
-                    chat.style.transform = 'translateX(' + (Chat.translateX - delay) + 'px)';
+                    chat.style.transform = 'translateX(' + (Chat.translateX - Chat.delay) + 'px)';
                 }
             }
         }, true);
@@ -1679,7 +1729,7 @@ var Chat = {
         chat.addEventListener('touchend', function (event) {
             chat.classList.add('moving');
 
-            if (Chat.translateX > (clientWidth / 4) && Chat.slideAuthorized) {
+            if (Chat.translateX > (Chat.clientWidth / 4) && Chat.slideAuthorized) {
                 MovimTpl.hidePanel();
                 Chat.get(null, true);
             }
@@ -1702,7 +1752,8 @@ var Chat = {
     },
     getNewerMessages: function () {
         var jid = MovimUtils.urlParts().params[0];
-        let lastMessage = Chat.getDiscussion().querySelector('li:last-child .bubble:last-child .message:last-child');
+
+        let lastMessage = Chat.getDiscussion()?.querySelector('li:last-child .bubble:last-child .message:last-child');
 
         if (jid) {
             Chat_ajaxGetHistory(
@@ -1714,6 +1765,18 @@ var Chat = {
             );
         }
     },
+    searchMembers: function (key) {
+        var selector = '#room_nav_members > li';
+
+        document.querySelectorAll(selector)
+            .forEach(item => item.classList.remove('found'));
+
+        var founds = document.querySelectorAll(
+            selector + '[name*="' + MovimUtils.cleanupId(key).slice(3) + '"]'
+        );
+
+        founds.forEach(item => item.classList.add('found'));
+    }
 };
 
 MovimWebsocket.attach(function () {
@@ -1766,14 +1829,14 @@ MovimEvents.registerWindow('loaded', 'chat', () => {
 
     if (typeof Upload != 'undefined') {
         Upload.initiate((file) => {
-            if (MovimUtils.urlParts().page == 'chat'
+            if (['chat', 'space'].includes(MovimUtils.urlParts().page)
                 && (typeof (PublishStories) == 'undefined' || PublishStories.main == undefined)) {
                 Upload.prependName = 'chat';
             }
         });
 
         Upload.attach((file) => {
-            if (MovimUtils.urlParts().page == 'chat'
+            if (['chat', 'space'].includes(MovimUtils.urlParts().page)
                 && (typeof (PublishStories) == 'undefined' || PublishStories.main == undefined)) {
                 Chat_ajaxHttpDaemonSendMessage(
                     Chat.getTextarea().dataset.jid,

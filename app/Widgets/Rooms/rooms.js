@@ -1,6 +1,18 @@
 var Rooms = {
     default_services: [],
 
+    cleanId: function (input) {
+        if (input.value) {
+            if (input.value.substring(0, 5) == 'xmpp:') {
+                input.value = input.value.substring(5);
+            }
+
+            if (input.value.slice(-5) == '?join') {
+                input.value = input.value.slice(0, -5);
+            }
+        }
+    },
+
     setDefaultServices: function (services) {
         Rooms.default_services = services;
     },
@@ -74,9 +86,10 @@ var Rooms = {
         }
     },
 
-    selectGatewayRoom: function (room, name) {
-        document.querySelector('form[name="bookmarkmucadd"] input[name=jid]').value = room;
-        document.querySelector('form[name="bookmarkmucadd"] input[name=name]').value = name;
+    selectGatewayRoom: function (room) {
+        document.querySelector('form[name="rooms_discover"] input[name=jid]').value = room;
+        RoomsUtils_ajaxDiscoRoom(room);
+        MovimUtils.addClass('#rooms_discover_add', 'disabled');
     },
 
     setJid: function (slugifiedJid) {

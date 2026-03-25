@@ -134,29 +134,23 @@ class SpaceInfo extends Base
 
     public function onConfig(Packet $packet)
     {
-        list($server, $node, $config) = array_values($packet->content);
-
         $view = $this->tpl();
 
         $xml = new XMPPtoForm($this->me);
-        $view->assign('server', $server);
-        $view->assign('node', $node);
-        $view->assign('config', $xml->getArray($config->x));
-        $view->assign('attributes', $config->attributes());
+        $view->assign('server', $packet->content['server']);
+        $view->assign('node', $packet->content['node']);
+        $view->assign('config', $xml->getArray($packet->content['config']->x));
+        $view->assign('attributes', $packet->content['config']->attributes());
 
         $this->drawer('spaceinfo_config', $view->draw('_spaceinfo_config'), tiny: true);
         $this->rpc('MovimUtils.applyAutoheight');
 
-        $this->ajaxGetAffiliations($server, $node);
+        $this->ajaxGetAffiliations($packet->content['server'], $packet->content['node']);
     }
 
     public function ajaxEditMember(string $server, string $node)
     {
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
         if ($subscription) {
             $this->dialog($this->view('_spaceinfo_member', [
@@ -171,27 +165,24 @@ class SpaceInfo extends Base
 
     public function ajaxHttpGet(string $server, string $node, ?bool $edit = false)
     {
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
-        if ($subscription && $subscription->info) {
-            $this->rpc('MovimTpl.fill', '#spaceinfo_widget', $this->view('_spaceinfo', [
-                'subscription' => $subscription,
-                'edit' => $edit
-            ]));
+        if ($subscription) {
+            if ($subscription->info) {
+                $this->rpc('MovimTpl.fill', '#spaceinfo_widget', $this->view('_spaceinfo', [
+                    'subscription' => $subscription,
+                    'edit' => $edit
+                ]));
+            } else {
+                $this->rpc('SpacesMenu_ajaxGetSpaceInfo', $server, $node);
+                $this->rpc('SpacesMenu_ajaxRooms', $server, $node);
+            }
         }
     }
 
     public function ajaxChangeConfiguration(string $server, string $node, \stdClass $data)
     {
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
         if (
             $subscription
@@ -279,29 +270,25 @@ class SpaceInfo extends Base
 
         $key = $server . $node . 'avatar';
 
-        $p = new Image;
-        $p->fromBase64($form->photobin->value);
-        $p->setKey($key);
-        $p->save(false, false, 'jpeg', 60);
+        $image = new Image;
+        $image->fromBase64($form->photobin->value);
+        $image->setKey($key);
+        $image->save(format: 'jpeg', quality: 60, directory: IMAGES_DIR);
 
         // Reload the freshly compressed picture
-        $p->load('jpeg');
+        $image->load('jpeg', directory: IMAGES_DIR);
 
         $r = $this->xmpp(new AvatarSet);
         $r->setTo($server)
             ->setNode($node)
-            ->setUrl(Image::getOrCreate($key, false, false, 'jpeg', true))
-            ->setData($p->toBase())
+            ->setUrl(Image::getOrCreate($key, format: 'jpeg', noTime: true, directory: IMAGES_DIR))
+            ->setData($image->toBase())
             ->request();
     }
 
     public function ajaxAskDestroy(string $server, string $node)
     {
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
         if ($subscription) {
             $this->dialog($this->view('_spaceinfo_destroy', [
@@ -314,11 +301,7 @@ class SpaceInfo extends Base
 
     public function ajaxDestroy(string $server, string $node)
     {
-        $subscription = $this->me->subscriptions()
-            ->spaces()
-            ->where('server', $server)
-            ->where('node', $node)
-            ->first();
+        $subscription = $this->me->subscriptions()->space($server, $node)->first();
 
         if ($subscription) {
             foreach ($subscription->spaceRooms as $conference) {

@@ -200,15 +200,13 @@ class Login extends Base
         string $deviceId,
         string $login,
         string $key,
-        ?string $sessionId = null,
         string $timezone,
+        ?string $sessionId = null,
         ?bool $check = false
     ) {
         if ($sessionId == null) return;
 
-        $validateLogin = Validator::stringType()->length(1, 254);
-
-        if (!$validateLogin->isValid($login)) {
+        if (!validateJid($login)) {
             $this->showErrorBlock('login_format');
             return;
         }
@@ -253,7 +251,8 @@ class Login extends Base
         ?string $deviceId = null
     ) {
         $configuration = Configuration::get();
-        if (!Validator::stringType()->length(1, 254)->isValid($login)) {
+
+        if (!validateJid($login)) {
             $this->showErrorBlock('login_format');
             return;
         }
